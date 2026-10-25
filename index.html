@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>13支記分板</title>
+<style>
+*{box-sizing:border-box}
+body{
+ font-family:Arial,"Microsoft JhengHei",sans-serif;
+ background:#f3f5f8;
+ margin:0;
+ padding:12px;
+ color:#222;
+}
+main{max-width:700px;margin:auto}
+h1{text-align:center;font-size:25px}
+h2{font-size:19px}
+.card{
+ background:white;
+ border-radius:12px;
+ padding:12px;
+ margin:12px 0;
+ box-shadow:0 2px 8px #0001;
+}
+table{
+ border-collapse:collapse;
+ width:100%;
+ text-align:center;
+}
+th,td{
+ border:1px solid #ccc;
+ padding:5px 2px;
+}
+th{background:#e6edf7}
+input{
+ width:100%;
+ min-width:0;
+ padding:8px 1px;
+ text-align:center;
+ font-size:16px;
+ border:1px solid #aaa;
+ border-radius:5px;
+}
+input:disabled{
+ background:#eee;
+ color:#333;
+ opacity:1;
+}
+.score{background:#fff4d6}
+.total{
+ background:#d9f1e1;
+ font-weight:bold;
+ font-size:18px;
+}
+button{
+ border:0;
+ border-radius:9px;
+ padding:13px;
+ font-size:16px;
+ cursor:pointer;
+}
+.buttons{display:flex;gap:8px;flex-wrap:wrap}
+.primary{background:#1769c2;color:white;flex:2}
+.secondary{background:#e1e5ea;flex:1}
+.danger{background:#b52c35;color:white}
+#history td{font-size:14px}
+.note{font-size:13px;color:#666;line-height:1.6}
+</style>
+</head>
+<body>
+<main>
+<h1>🃏 13支記分板</h1>
+
+<div class="card">
+<h2>玩家姓名</h2>
+<div id="names" style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px"></div>
+</div>
+
+<div class="card">
+<h2>本局計分</h2>
+<table id="scoreTable"></table>
+<p class="note">
+黃色格子輸入分數，對應的負分會自動產生。
+輸入 -2 可直接使用鍵盤負號。
+</p>
+<div class="buttons">
+<button class="primary" onclick="saveRound()">儲存本局</button>
+<button class="secondary" onclick="clearInputs()">清空輸入</button>
+</div>
+</div>
+
+<div class="card">
+<h2>歷史紀錄（最多20局）</h2>
+<div style="overflow-x:auto">
+<table id="history"></table>
+</div>
+<p id="count" class="note"></p>
+<div class="buttons">
+<button class="secondary" onclick="undoRound()">撤銷上一局</button>
+<button class="danger" onclick="resetAll()">清除全部紀錄</button>
+</div>
+</div>
+</main>
+
+<script>
+const KEY="thirteen-score-v1";
+const NAMEKEY="thirteen-names-v1";
+let records=[];
+let names=["玩家1","玩家2","玩家3","玩家4","玩家5"];
+
+// 對應 Excel C:G 的5人計分矩陣。
+// 下三角輸入，對稱位置自動取負值。
+const table=document.getElementById("scoreTable");
+const cells={};
+
+function buildTable(){
+ let html="<tr><th></th>";
+ for(let j=0;j<5;j++){
+  html+="<th id='head"+j+"'></th>";
+ }
+ html+="</tr>";
+ for(let i=0;i<5;i++){
+  html+="<tr><th id='row"+i+"'></th>";
+  for(let j=0;j<5;j++){
+   if(i===j){
+    html+="<td>—</td>";
+   }else if(i>j){
+    html+=`<td><input class="score"
+      id="s${i}_${j}"
+      type="number" step="any"
+      inputmode="decimal"
+      oninput="calculate()"></td>`;
+   }else{
+    html+=`<td><input id="s${i}_${j}"
+      disabled></td>`;
+   }
+  }
+  html+="</tr>";
+ }
+ html+="<tr><th>合計</th>";
+ for(let j=0;j<5;j++){
+  html+=`<td class="total" id="total${j}">0</td>`;
+ }
+ html+="</tr>";
+ table.innerHTML=html;
+ for(let i=0;i<5;i++){
+  for(let j=0;j<5;j++){
+   if(i!==j)cells[`${i}_${j}`]=
+    document.getElementById(`s${i}_${j}`);
+  }
+ }
+}
+
+function buildNames(){
+ const box=document.getElementById("names");
+ box.innerHTML="";
+ names.forEach((name,i)=>{
+  const input=document.createElement("input");
+  input.value=name;
+  input.setAttribute("aria-label","玩家"+(i+1)+"姓名");
+  input.addEventListener("change",()=>{
+   names[i]=input.value.trim()||"玩家"+(i+1);
+   localStorage.setItem(NAMEKEY,JSON.stringify(names));
+   updateNames();
+   renderHistory();
+  });
+  box.appendChild(input);
+ });
+ updateNames();
+}
+
+function updateNames(){
+ for(let i=0;i<5;i++){
+  document.getElementById("head"+i).textContent=names[i];
+  document.getElementById("row"+i).textContent=names[i];
+ }
+}
+
+function calculate(){
+ const matrix=Array.from({length:5},()=>Array(5).fill(0));
+ for(let i=1;i<5;i++){
+  for(let j=0;j<i;j++){
+   const value=Number(cells[`${i}_${j}`].value)||0;
+   matrix[i][j]=value;
+   matrix[j][i]=-value;
+   cells[`${j}_${i}`].value=
+    cells[`${i}_${j}`].value===""?"":-value;
+  }
+ }
+ const totals=Array(5).fill(0);
+ for(let j=0;j<5;j++){
+  for(let i=0;i<5;i++){
+   totals[j]+=matrix[i][j];
+  }
+  document.getElementById("total"+j).textContent=totals[j];
+ }
+ return totals;
+}
+
+function clearInputs(){
+ for(let i=1;i<5;i++){
+  for(let j=0;j<i;j++){
+   cells[`${i}_${j}`].value="";
+  }
+ }
+ calculate();
+}
+
+function saveRound(){
+ if(records.length>=20){
+  alert("已達20局，請先清除紀錄。");
+  return;
+ }
+ let hasInput=false;
+ for(let i=1;i<5;i++){
+  for(let j=0;j<i;j++){
+   if(cells[`${i}_${j}`].value!=="")hasInput=true;
+  }
+ }
+ if(!hasInput){
+  alert("請先輸入本局分數。");
+  return;
+ }
+ const totals=calculate();
+ records.push([...totals]);
+ persist();
+ clearInputs();
+ renderHistory();
+}
+
+function persist(){
+ try{
+  localStorage.setItem(KEY,JSON.stringify(records));
+ }catch(e){
+  alert("無法儲存紀錄，請檢查瀏覽器儲存設定。");
+ }
+}
+
+function renderHistory(){
+ const history=document.getElementById("history");
+ let html="<tr><th>局數</th>";
+ names.forEach(n=>html+="<th>"+escapeHTML(n)+"</th>");
+ html+="</tr>";
+ records.forEach((r,i)=>{
+  html+="<tr><td>"+(i+1)+"</td>";
+  r.forEach(v=>html+="<td>"+v+"</td>");
+  html+="</tr>";
+ });
+ const sums=Array(5).fill(0);
+ records.forEach(r=>r.forEach((v,i)=>sums[i]+=v));
+ html+="<tr class='total'><td>累計</td>";
+ sums.forEach(v=>html+="<td>"+v+"</td>");
+ html+="</tr>";
+ history.innerHTML=html;
+ document.getElementById("count").textContent=
+  "已記錄 "+records.length+" / 20 局";
+}
+
+function escapeHTML(s){
+ return s.replace(/[&<>"']/g,c=>({
+  "&":"&amp;","<":"&lt;",">":"&gt;",
+  '"':"&quot;","'":"&#39;"
+ })[c]);
+}
+
+function undoRound(){
+ if(!records.length)return;
+ if(confirm("確定撤銷上一局？")){
+  records.pop();
+  persist();
+  renderHistory();
+ }
+}
+
+function resetAll(){
+ if(confirm("確定刪除全部歷史紀錄？")){
+  records=[];
+  persist();
+  clearInputs();
+  renderHistory();
+ }
+}
+
+try{
+ const saved=JSON.parse(localStorage.getItem(KEY));
+ if(Array.isArray(saved)){
+  records=saved.filter(r=>
+   Array.isArray(r)&&r.length===5&&
+   r.every(Number.isFinite)
+  ).slice(0,20);
+ }
+ const savedNames=JSON.parse(localStorage.getItem(NAMEKEY));
+ if(Array.isArray(savedNames)&&savedNames.length===5){
+  names=savedNames.map((n,i)=>
+   typeof n==="string"&&n.trim()?n:"玩家"+(i+1)
+  );
+ }
+}catch(e){}
+
+buildTable();
+buildNames();
+calculate();
+renderHistory();
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function() {
+    navigator.serviceWorker.register("./sw.js");
+  });
+}
+</body>
+</html>
